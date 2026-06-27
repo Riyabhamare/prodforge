@@ -16,8 +16,10 @@ export default function LoginPage() {
       localStorage.setItem("token", res.data.access_token);
       localStorage.setItem("user", JSON.stringify(res.data.user));
       router.push("/dashboard");
-    } catch {
-      setError("Can't reach backend. Make sure it's running on port 8000.");
+    } catch (err: any) {
+      console.error("Login error:", err);
+      const msg = err?.response?.data?.detail || err?.message || "Unknown error";
+      setError(`Backend error: ${msg}. API: ${process.env.NEXT_PUBLIC_API_URL || "NOT SET"}`);
     } finally {
       setLoading(false);
     }
