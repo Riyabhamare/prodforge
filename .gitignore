@@ -1,0 +1,9 @@
+# .gitignore (place in prodforge/)
+__pycache__/
+*.pyc
+.env
+.env.local
+node_modules/
+.next/
+*.egg-info/
+.venv/
