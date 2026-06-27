@@ -1,194 +1,155 @@
-# backend/services/gemini.py
-# MOCK VERSION - replace with real Gemini calls once API key is working
-
-import json
+from google import genai
 import os
-import time
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-USE_MOCK = True  # Set to False once your API key works
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-
-def _try_gemini(prompt: str) -> str | None:
-    """Try real Gemini call, return None if quota exceeded."""
-    if not GEMINI_API_KEY or USE_MOCK:
-        return None
-    try:
-        from google import genai
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        r = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        return r.text
-    except Exception as e:
-        print(f"Gemini API failed, using mock: {e}")
-        return None
-
-
-def clean_json_response(text: str) -> str:
-    text = text.strip()
+def _call_gemini(prompt: str) -> str:
+    """Single helper so we only write the API call once"""
+    response = client.models.generate_content(
+        model="gemini-1.5-flash-8b",
+        contents=prompt
+    )
+    text = response.text.strip()
+    # Remove markdown code blocks if Gemini adds them
     if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        text = "\n".join(lines).strip()
-    return text
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return text.strip()
 
 
-# ─── 1. Task Breakdown ────────────────────────────────────
-
-def forge_task(title: str, deadline_days: int, user_history: dict = None) -> dict:
+def forge_task(task_description: str, deadline: str) -> dict:
+    """Break a task into subtasks using Gemini"""
     prompt = f"""
-You are ProdForge AI. Break this task into subtasks.
-Task: "{title}"
-Days until deadline: {deadline_days}
-Return ONLY valid JSON:
+You are a productivity expert AI. A user has this task: "{task_description}" with deadline: "{deadline}".
+
+Break this into subtasks and return ONLY valid JSON, no markdown, no explanation:
 {{
-  "subtasks": [{{"title": str, "estimated_minutes": int, "day": int, "priority": str}}],
-  "total_estimated_hours": float,
-  "risk_score": float,
-  "completion_probability": float,
-  "risk_level": str,
-  "advice": str,
-  "rescue_needed": bool
+  "title": "main task title",
+  "subtasks": [
+    {{"title": "subtask name", "estimated_hours": 2, "priority": "high", "order": 1}},
+    {{"title": "subtask name", "estimated_hours": 1, "priority": "medium", "order": 2}}
+  ],
+  "total_estimated_hours": 10,
+  "difficulty": "medium",
+  "strategy": "one sentence execution strategy"
 }}
 """
-    raw = _try_gemini(prompt)
-    if raw:
-        return json.loads(clean_json_response(raw))
-
-    # Mock response based on deadline
-    risk = max(0.1, min(0.95, 1.0 - (deadline_days * 0.12)))
-    return {
-        "subtasks": [
-            {"title": f"Research and plan: {title}", "estimated_minutes": 45, "day": 1, "priority": "high"},
-            {"title": "Set up environment and tools", "estimated_minutes": 30, "day": 1, "priority": "high"},
-            {"title": "Core implementation - Part 1", "estimated_minutes": 90, "day": 2, "priority": "high"},
-            {"title": "Core implementation - Part 2", "estimated_minutes": 90, "day": 3, "priority": "high"},
-            {"title": "Testing and debugging", "estimated_minutes": 60, "day": 4, "priority": "medium"},
-            {"title": "Documentation and final review", "estimated_minutes": 45, "day": deadline_days, "priority": "medium"},
-        ],
-        "total_estimated_hours": 6.0,
-        "risk_score": round(risk, 2),
-        "completion_probability": round(1.0 - risk, 2),
-        "risk_level": "critical" if risk > 0.8 else "high" if risk > 0.6 else "medium" if risk > 0.3 else "low",
-        "advice": f"You have {deadline_days} days. Start with the highest priority items today to stay on track.",
-        "rescue_needed": risk > 0.75
-    }
+    try:
+        return json.loads(_call_gemini(prompt))
+    except Exception as e:
+        print(f"forge_task error: {e}")
+        return {
+            "title": task_description,
+            "subtasks": [
+                {"title": "Research and planning", "estimated_hours": 2, "priority": "high", "order": 1},
+                {"title": "Core execution", "estimated_hours": 4, "priority": "high", "order": 2},
+                {"title": "Review and finalize", "estimated_hours": 1, "priority": "medium", "order": 3}
+            ],
+            "total_estimated_hours": 7,
+            "difficulty": "medium",
+            "strategy": "Break work into focused sessions and start immediately."
+        }
 
 
-# ─── 2. Risk Analysis ─────────────────────────────────────
+def get_risk_prediction(task_title: str, deadline: str, completed_subtasks: int, total_subtasks: int) -> dict:
+    """Predict deadline risk using Gemini"""
+    prompt = f"""
+You are a deadline risk analyst AI. Analyze this task:
+- Task: "{task_title}"
+- Deadline: "{deadline}"
+- Progress: {completed_subtasks}/{total_subtasks} subtasks done
 
-def analyze_risk(task_title: str, deadline_days: int, subtasks_done: int,
-                 total_subtasks: int, user_completion_rate: float = 0.7) -> dict:
-    prompt = f"Analyze risk for task: {task_title}, {deadline_days} days left, {subtasks_done}/{total_subtasks} done. Return JSON."
-    raw = _try_gemini(prompt)
-    if raw:
-        return json.loads(clean_json_response(raw))
-
-    progress = subtasks_done / total_subtasks if total_subtasks > 0 else 0
-    expected = 1.0 - (deadline_days / max(deadline_days + 1, 7))
-    behind = max(0, expected - progress)
-    risk = min(0.95, behind + (1 - user_completion_rate) * 0.3)
-
-    return {
-        "risk_score": round(risk, 2),
-        "miss_probability": round(risk * 0.9, 2),
-        "confidence": 0.82,
-        "risk_level": "critical" if risk > 0.8 else "high" if risk > 0.6 else "medium" if risk > 0.3 else "low",
-        "intervention_message": f"You've completed {subtasks_done}/{total_subtasks} subtasks with {deadline_days} days left. {'You need to pick up the pace!' if risk > 0.5 else 'You are on track!'}",
-        "recommended_action": "Focus on completing the next subtask before anything else."
-    }
-
-
-# ─── 3. Emergency Rescue Plan ─────────────────────────────
-
-def generate_rescue_plan(task_title: str, deadline_hours: int,
-                         remaining_subtasks: list) -> dict:
-    raw = _try_gemini(f"Emergency rescue plan for: {task_title}, {deadline_hours} hours left")
-    if raw:
-        return json.loads(clean_json_response(raw))
-
-    sessions = []
-    for i, subtask in enumerate(remaining_subtasks[:6], 1):
-        sessions.append({
-            "session_number": i,
-            "focus_task": subtask,
-            "duration_minutes": 25,
-            "break_minutes": 5,
-            "goal": f"Complete: {subtask}"
-        })
-
-    return {
-        "rescue_message": f"🚨 Emergency mode activated! You have {deadline_hours} hours. Follow this battle plan exactly.",
-        "total_pomodoros": len(sessions),
-        "sessions": sessions,
-        "survival_tips": [
-            "Close all social media and distractions right now",
-            "Put your phone in another room",
-            "Work in 25-minute focused sprints",
-            "Done is better than perfect — submit something"
-        ],
-        "minimum_viable_completion": f"Complete at least the first {min(3, len(remaining_subtasks))} subtasks for a passing submission."
-    }
+Return ONLY valid JSON:
+{{
+  "risk_score": 72,
+  "completion_probability": 45,
+  "risk_level": "high",
+  "message": "specific warning message",
+  "recommendation": "specific action to take now",
+  "if_delayed_message": "what happens if user delays 1 more day"
+}}
+"""
+    try:
+        return json.loads(_call_gemini(prompt))
+    except Exception as e:
+        print(f"get_risk_prediction error: {e}")
+        return {
+            "risk_score": 60,
+            "completion_probability": 50,
+            "risk_level": "medium",
+            "message": "Moderate risk detected. Stay on track.",
+            "recommendation": "Complete at least 2 subtasks today.",
+            "if_delayed_message": "Delaying further will increase risk significantly."
+        }
 
 
-# ─── 4. AI Coach Daily Insight ────────────────────────────
+def get_coach_insight(completed_tasks: int, missed_tasks: int, avg_completion_time: float) -> dict:
+    """Generate coaching insight using Gemini"""
+    prompt = f"""
+You are a personal productivity coach AI. User stats:
+- Completed tasks: {completed_tasks}
+- Missed deadlines: {missed_tasks}
+- Avg completion time: {avg_completion_time} hours
 
-def get_coaching_insight(user_name: str, tasks_completed: int,
-                         tasks_missed: int, streak: int,
-                         pending_tasks: list) -> dict:
-    raw = _try_gemini(f"Coach insight for {user_name}: {tasks_completed} done, {tasks_missed} missed")
-    if raw:
-        return json.loads(clean_json_response(raw))
-
-    total = tasks_completed + tasks_missed
-    rate = tasks_completed / total if total > 0 else 0.7
-    score = int(rate * 100)
-
-    quotes = [
-        "Small progress is still progress.",
-        "The secret of getting ahead is getting started.",
-        "Focus on progress, not perfection.",
-        "Every expert was once a beginner.",
-    ]
-
-    return {
-        "greeting": f"Good work, {user_name}! 👋",
-        "insight": f"You've completed {tasks_completed} tasks with a {score}% success rate. {'Great momentum!' if score > 70 else 'There is room to improve — lets focus today.'}",
-        "pattern_detected": "You tend to be most productive in the first half of the day." if streak > 2 else "Building a streak will boost your productivity significantly.",
-        "todays_focus": f"You have {len(pending_tasks)} pending tasks. Pick the most important one and finish it completely before moving on.",
-        "motivation_score": score,
-        "quote": quotes[tasks_completed % len(quotes)]
-    }
-
-
-# ─── 5. Digital Twin Simulation ───────────────────────────
-
-def simulate_delay(task_title: str, current_probability: float,
-                   delay_days: int, deadline_days: int) -> dict:
-    raw = _try_gemini(f"Simulate delay of {delay_days} days for task: {task_title}")
-    if raw:
-        return json.loads(clean_json_response(raw))
-
-    drop = min(0.5, delay_days * 0.08 + (delay_days / max(deadline_days, 1)) * 0.3)
-    delayed = max(0.05, current_probability - drop)
-    new_risk = 1.0 - delayed
-
-    return {
-        "current_probability": round(current_probability, 2),
-        "delayed_probability": round(delayed, 2),
-        "probability_drop": round(drop, 2),
-        "new_risk_level": "critical" if new_risk > 0.8 else "high" if new_risk > 0.6 else "medium",
-        "warning_message": f"Delaying by {delay_days} day{'s' if delay_days > 1 else ''} drops your success chance from {int(current_probability*100)}% to {int(delayed*100)}%.",
-        "recovery_possible": delayed > 0.2,
-        "recovery_strategy": f"You would need to work {round(delay_days * 1.5, 1)} extra hours per day to recover the lost time."
-    }
+Return ONLY valid JSON:
+{{
+  "insight": "personalized insight about their productivity pattern",
+  "pattern": "one key behavioral pattern observed",
+  "tip": "one specific actionable tip",
+  "score": 78,
+  "burnout_risk": "low"
+}}
+"""
+    try:
+        return json.loads(_call_gemini(prompt))
+    except Exception as e:
+        print(f"get_coach_insight error: {e}")
+        return {
+            "insight": "You're making steady progress. Keep going!",
+            "pattern": "Consistent effort with room for improvement",
+            "tip": "Start your hardest task first thing in the morning.",
+            "score": 70,
+            "burnout_risk": "low"
+        }
 
 
-# ─── Quick test ───────────────────────────────────────────
+def get_rescue_plan(task_title: str, deadline: str, remaining_subtasks: list) -> dict:
+    """Generate emergency rescue plan using Gemini"""
+    subtasks_text = ", ".join(remaining_subtasks) if remaining_subtasks else "all tasks"
+    prompt = f"""
+You are an emergency productivity rescue AI. User is in CRISIS:
+- Task: "{task_title}"
+- Deadline: "{deadline}" (URGENT)
+- Remaining: {subtasks_text}
 
-if __name__ == "__main__":
-    print("Testing Gemini service (mock mode)...\n")
-    result = forge_task("Complete my machine learning project", deadline_days=5)
-    print(json.dumps(result, indent=2))
+Generate an emergency plan. Return ONLY valid JSON:
+{{
+  "emergency_message": "urgent motivating message",
+  "pomodoro_sessions": [
+    {{"session": 1, "duration_minutes": 25, "focus": "what to do", "break_minutes": 5}},
+    {{"session": 2, "duration_minutes": 25, "focus": "what to do", "break_minutes": 5}}
+  ],
+  "must_do_now": ["action 1", "action 2", "action 3"],
+  "can_skip": ["thing that can be skipped"],
+  "survival_strategy": "one key strategy to survive this deadline"
+}}
+"""
+    try:
+        return json.loads(_call_gemini(prompt))
+    except Exception as e:
+        print(f"get_rescue_plan error: {e}")
+        return {
+            "emergency_message": "Code red! Drop everything and focus NOW.",
+            "pomodoro_sessions": [
+                {"session": 1, "duration_minutes": 25, "focus": "Most critical task", "break_minutes": 5},
+                {"session": 2, "duration_minutes": 25, "focus": "Second priority", "break_minutes": 5}
+            ],
+            "must_do_now": ["Start immediately", "Eliminate all distractions", "Focus on core deliverables"],
+            "can_skip": ["Nice-to-have features"],
+            "survival_strategy": "Focus only on what's absolutely necessary to submit."
+        }

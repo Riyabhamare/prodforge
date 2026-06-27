@@ -9,6 +9,8 @@ load_dotenv()
 
 from models.database import create_tables
 from routers import tasks, users, analytics, coach
+from routers import forge
+app.include_router(forge.router, prefix="/api/ai", tags=["AI"])
 
 app = FastAPI(
     title="ProdForge API",
