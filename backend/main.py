@@ -1,5 +1,3 @@
-# backend/main.py
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -10,7 +8,6 @@ load_dotenv()
 from models.database import create_tables
 from routers import tasks, users, analytics, coach
 from routers import forge
-app.include_router(forge.router, prefix="/api/ai", tags=["AI"])
 
 app = FastAPI(
     title="ProdForge API",
@@ -18,7 +15,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# ─── CORS ─────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -31,27 +27,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Create DB tables on startup ──────────────────────────
 @app.on_event("startup")
 async def startup():
     create_tables()
     print("✅ ProdForge API started successfully")
 
-# ─── Routers ──────────────────────────────────────────────
 app.include_router(users.router,     prefix="/api/users",     tags=["Users"])
 app.include_router(tasks.router,     prefix="/api/tasks",     tags=["Tasks"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(coach.router,     prefix="/api/coach",     tags=["Coach"])
+app.include_router(forge.router,     prefix="/api/ai",        tags=["AI"])
 
-# ─── Root ─────────────────────────────────────────────────
 @app.get("/")
 async def root():
-    return {
-        "app": "ProdForge",
-        "status": "running",
-        "version": "1.0.0",
-        "docs": "/docs"
-    }
+    return {"app": "ProdForge", "status": "running", "version": "1.0.0", "docs": "/docs"}
 
 @app.get("/health")
 async def health():
