@@ -6,8 +6,7 @@ import os
 load_dotenv()
 
 from models.database import create_tables
-from routers import tasks, users, analytics, coach
-
+from routers import tasks, users, analytics, coach, forge
 app = FastAPI(
     title="ProdForge API",
     description="AI-powered productivity execution engine",
