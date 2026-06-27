@@ -237,5 +237,6 @@ Return ONLY valid JSON:
             "warning": f"Delaying {delay_days} day(s) significantly reduces your chances of completion.",
             "recommendation": "Start now instead of delaying. Even 30 minutes of work helps."
         }
-    
-    get_coaching_insight = get_coach_insight
+
+
+get_coaching_insight = get_coach_insight  # ← at module level
