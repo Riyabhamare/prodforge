@@ -7,7 +7,6 @@ load_dotenv()
 
 from models.database import create_tables
 from routers import tasks, users, analytics, coach
-from routers import forge
 
 app = FastAPI(
     title="ProdForge API",
