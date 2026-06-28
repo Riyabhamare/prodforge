@@ -9,16 +9,20 @@ client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def _call_gemini(prompt: str) -> str:
-    response = client.models.generate_content(
-        model="models/gemini-2.0-flash-lite",
-        contents=prompt
-    )
-    text = response.text.strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return text.strip()
+    try:
+        response = client.models.generate_content(
+            model="models/gemini-2.0-flash-lite",
+            contents=prompt
+        )
+        text = response.text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return text.strip()
+    except Exception as e:
+        print(f"Gemini API error: {e}")
+        raise  # re-raise so individual functions catch it
 
 
 def forge_task(task_description: str, deadline: any, user_history: dict = None) -> dict:
@@ -137,12 +141,21 @@ Return ONLY valid JSON:
         }
 
 
-def get_coach_insight(completed_tasks: int, missed_tasks: int, avg_completion_time: float) -> dict:
+def get_coach_insight(completed_tasks: int = 0, missed_tasks: int = 0, 
+                      avg_completion_time: float = 0, user_name: str = "there",
+                      streak: int = 0, pending_tasks: list = None,
+                      tasks_completed: int = 0, tasks_missed: int = 0) -> dict:
+    # use tasks_completed if completed_tasks not provided
+    completed = completed_tasks or tasks_completed
+    missed = missed_tasks or tasks_missed
+    pending = pending_tasks or []
+    
     prompt = f"""
-You are a personal productivity coach AI. User stats:
-- Completed tasks: {completed_tasks}
-- Missed deadlines: {missed_tasks}
-- Avg completion time: {avg_completion_time} hours
+You are a personal productivity coach AI. Stats for {user_name}:
+- Completed tasks: {completed}
+- Missed deadlines: {missed}
+- Current streak: {streak} days
+- Pending tasks: {", ".join(pending) if pending else "none"}
 
 Return ONLY valid JSON:
 {{
@@ -158,13 +171,14 @@ Return ONLY valid JSON:
     except Exception as e:
         print(f"get_coach_insight error: {e}")
         return {
-            "insight": "You're making steady progress. Keep going!",
+            "insight": f"Hey {user_name}! You've completed {completed} tasks. Keep pushing!",
             "pattern": "Consistent effort with room for improvement",
             "tip": "Start your hardest task first thing in the morning.",
             "score": 70,
             "burnout_risk": "low"
         }
 
+get_coaching_insight = get_coach_insight
 
 def generate_rescue_plan(task_title: str, deadline_hours: int, remaining_subtasks: list) -> dict:
     subtasks_text = ", ".join(remaining_subtasks) if remaining_subtasks else "all tasks"
