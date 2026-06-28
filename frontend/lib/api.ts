@@ -17,6 +17,12 @@ export default API;
 
 // ── Auth ──────────────────────────────────────────────────
 export const demoLogin = () => API.get("/api/users/demo-login");
+export const loginWithGoogle = (data: {
+  google_id: string;
+  email: string;
+  name?: string;
+  picture?: string;
+}) => API.post("/api/users/login", data);
 export const getMe = () => API.get("/api/users/me");
 
 // ── Tasks ─────────────────────────────────────────────────
